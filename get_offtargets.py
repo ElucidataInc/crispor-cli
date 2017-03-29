@@ -1,12 +1,56 @@
-import logging,subprocess,shutil
-
-from basic_imports import *
-from constants import *
+import logging,subprocess,shutil,string
 import constants as cnst
 import common_functions
+import submit_process
+
+from collections import defaultdict, namedtuple
+from basic_imports import *
+from constants import *
+
 baseDir = cnst.baseDir
+revComp = common_functions.revComp
 # directory for genomes
 genomesDir = join(baseDir, "genomes")
+
+
+def getOfftargets(seq, org, pam, batchId,batchDir, startDict, queue,process_parameters):
+    """ write guides to fasta and run bwa or use cached results.
+    Return name of the BED file with the matches.
+    Write progress status updates to queue object.
+    """
+    batchBase = join(batchDir, batchId)
+    otBedFname = batchBase+".bed"
+    # write potential PAM sites to file 
+    faFname = batchBase+".fa"
+    writePamFlank(seq, startDict, pam, faFname)
+    processSubmission(faFname, org, pam, otBedFname, batchBase, batchId, queue,process_parameters)
+
+    return otBedFname
+
+
+def processSubmission(faFname, genome, pam, bedFname, batchBase, batchId, queue,parameters):
+    """ search fasta file against genome, filter for pam matches and write to bedFName 
+    optionally write status updates to work queue.
+    """
+    doEffScoring,useBowtie,cpf1Mode = parameters
+    if doEffScoring and not cpf1Mode:
+        queue.startStep(batchId, "effScores", "Calculating guide efficiency scores")
+        createBatchEffScoreTable(batchId)
+
+    if genome=="noGenome":
+        # skip off-target search
+        if cpf1Mode:
+            errAbort("Sorry, no efficiency score has been published yet for Cpf1.")
+        open(bedFname, "w") # create a 0-byte file to signal job completion
+        queue.startStep(batchId, "done", "Job completed")
+        return
+
+    if useBowtie:
+        findOfftargetsBowtie(queue, batchId, batchBase, faFname, genome, pam, bedFname)
+    else:
+        findOfftargetsBwa(queue, batchId, batchBase, faFname, genome, pam, bedFname)
+
+    return bedFname
 
 
 def debug(msg):
@@ -22,13 +66,8 @@ def runCmd(cmd, ignoreExitCode=False):
     debug("Running %s" % cmd)
     ret = subprocess.call(cmd, shell=True, executable="/bin/bash")
     if ret!=0 and not ignoreExitCode:
-        if commandLineMode:
-            logging.error("Error: could not run command %s." % cmd)
-            sys.exit(1)
-        else:
-            print "Server error: could not run command %s, error %d.<p>" % (cmd, ret)
-            print "please send us an email, we will fix this error as quickly as possible. %s " % contactEmail
-            sys.exit(0)
+        logging.error("Error: could not run command %s." % cmd)
+        sys.exit(1)
 
 
 def findOfftargetsBwa(queue, batchId, batchBase, faFname, genome, pam, bedFname):
@@ -38,16 +77,7 @@ def findOfftargetsBwa(queue, batchId, batchBase, faFname, genome, pam, bedFname)
     saFname = batchBase+".sa"
     pamLen = len(pam)
     genomeDir = genomesDir # make var local, see below
-
     open(matchesBedFname, "w") # truncate to 0 size
-
-    # increase MAXOCC if there is only a single query, but only in CGI mode
-    #if len(parseFasta(open(faFname)))==1 and not commandLineMode:
-        #global MAXOCC
-        #global maxMMs
-        #MAXOCC=max(HIGH_MAXOCC, MAXOCC)
-        #maxMMs=HIGH_maxMMs
-
     maxDiff = maxMMs
     queue.startStep(batchId, "bwa", "Alignment of potential guides, mismatches <= %d" % maxDiff)
     convertMsg = "Converting alignments"
@@ -215,4 +245,149 @@ def findOfftargetsBowtie(queue, batchId, batchBase, faFname, genome, pamPat, bed
         logging.info("debug mode: Not deleting %s" % tmpDir)
     else:
         shutil.rmtree(tmpDir)
+
+
+
+def flankSeqIter(seq, startDict, pam, doFilterNs):
+    """ given a seq and dictionary of pos -> strand and the length of the pamSite
+    yield tuples of (name, pamStart, guideStart, strand, flankSeq, pamSeq)
+
+    if doFilterNs is set, will not return any sequences that contain an N character
+    """
+    pamLen = len(pam)
+    GUIDELEN,cpf1Mode,addGenePlasmids = common_functions.setupPamInfo(pam)
+    startList = sorted(startDict.keys())
+    for pamStart in startList:
+        strand = startDict[pamStart]
+
+        if cpf1Mode: # Cpf1: get the sequence to the right of the PAM
+            if strand=="+":
+                guideStart = pamStart+pamLen
+                flankSeq = seq[guideStart:guideStart+GUIDELEN]
+                pamSeq = seq[pamStart:pamStart+pamLen]
+            else: # strand is minus
+                guideStart = pamStart-GUIDELEN
+                flankSeq = revComp(seq[guideStart:pamStart])
+                pamSeq = revComp(seq[pamStart:pamStart+pamLen])
+        else: # common case: get the sequence on the left side of the PAM
+            if strand=="+":
+                guideStart = pamStart-GUIDELEN
+                flankSeq = seq[guideStart:pamStart]
+                pamSeq = seq[pamStart:pamStart+pamLen]
+            else: # strand is minus
+                guideStart = pamStart+pamLen
+                flankSeq = revComp(seq[guideStart:guideStart+GUIDELEN])
+                pamSeq = revComp(seq[pamStart:pamStart+pamLen])
+
+        if "N" in flankSeq and doFilterNs:
+            continue
+
+        yield "s%d%s" % (pamStart, strand), pamStart, guideStart, strand, flankSeq, pamSeq
+
+
+def highlightMismatches(guide, offTarget, pamLen):
+    " return a string that marks mismatches between guide and offtarget with * "
+    if cpf1Mode:
+        offTarget = offTarget[pamLen:]
+    else:
+        offTarget = offTarget[:-pamLen]
+    assert(len(guide)==len(offTarget))
+
+    s = []
+    for x, y in zip(guide, offTarget):
+        if x==y:
+            s.append(".")
+        else:
+            s.append("*")
+    return "".join(s)
+
+
+
+def parseOfftargets(bedFname):
+    """ parse a bed file with annotataed off target matches from overlapSelect,
+    has two name fields, one with the pam position/strand and one with the
+    overlapped segment 
+    
+    return as dict pamId -> editDist -> (chrom, start, end, seq, strand, segType, segName, x1Score)
+    segType is "ex" "int" or "ig" (=intergenic)
+    if intergenic, geneNameStr is two genes, split by |
+    """
+    # example input:
+    # chrIV 9864393 9864410 s41-|-|5|ACTTGACTG|0    chrIV   9864303 9864408 ex:K07F5.16
+    # chrIV   9864393 9864410 s41-|-|5|ACTGTAGCTAGCT|9999    chrIV   9864408 9864470 in:K07F5.16
+    debug("reading offtargets from %s" % bedFname)
+
+    # first sort into dict (pamId,chrom,start,end,editDist,strand) 
+    # -> (segType, segName) 
+    pamData = {}
+    for line in open(bedFname):
+        fields = line.rstrip("\n").split("\t")
+        chrom, start, end, name, segment = fields
+        # hg38: ignore alternate chromosomes otherwise the 
+        # regions on the main chroms look as if they could not be 
+        # targeted at all with Cas9
+        if chrom.endswith("_alt"):
+            continue
+        nameFields = name.split("|")
+        pamId, strand, editDist, seq = nameFields[:4]
+
+        if len(nameFields)>4:
+            x1Count = int(nameFields[4])
+        else:
+            x1Count = 0
+        editDist = int(editDist)
+        # some gene models include colons
+        if ":" in segment:
+            segType, segName = string.split(segment, ":", maxsplit=1)
+        else:
+            segType, segName = "", segment
+        start, end = int(start), int(end)
+        otKey = (pamId, chrom, start, end, editDist, seq, strand, x1Count)
+
+        # if a offtarget overlaps an intron/exon or ig/exon boundary it will
+        # appear twice; in this case, we only keep the exon offtarget
+        if otKey in pamData and segType!="ex":
+            continue
+        pamData[otKey] = (segType, segName)
+
+    # index by pamId and edit distance
+    indexedOts = defaultdict(dict)
+    for otKey, otVal in pamData.iteritems():
+        pamId, chrom, start, end, editDist, seq, strand, x1Score = otKey
+        segType, segName = otVal
+        otTuple = (chrom, start, end, seq, strand, segType, segName, x1Score)
+        indexedOts[pamId].setdefault(editDist, []).append( otTuple )
+
+    return indexedOts
+
+def writePamFlank(seq, startDict, pam, faFname):
+    " write pam flanking sequences to fasta file, optionally with versions where each nucl is removed "
+    #print "writing pams to %s<br>" % faFname
+    faFh = open(faFname, "w")
+    for pamId, pamStart, guideStart, strand, flankSeq, pamSeq in flankSeqIter(seq, startDict, pam, True):
+        faFh.write(">%s\n%s\n" % (pamId, flankSeq))
+    faFh.close()
+
+
+def annotateBedWithPos(inBed, outBed):
+    """
+    given an input bed4 and an output bed filename, add an additional column 5 to the bed file
+    that is a descriptive text of the chromosome pos (e.g. chr1:1.23 Mbp).
+    """
+    ofh = open(outBed, "w")
+    for line in open(inBed):
+        chrom, start = line.split("\t")[:2]
+        start = int(start)
+
+        if start>1000000:
+            startStr = "%.2f Mbp" % (float(start)/1000000)
+        else:
+            startStr = "%.2f Kbp" % (float(start)/1000)
+        desc = "%s %s" % (chrom, startStr)
+
+        ofh.write(line.rstrip("\n"))
+        ofh.write("\t")
+        ofh.write(desc)
+        ofh.write("\n")
+    ofh.close()
 
