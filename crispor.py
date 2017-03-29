@@ -2680,19 +2680,13 @@ Command line interface for the Crispor tool.
     parser.add_option("", "--minAltPamScore", dest="minAltPamScore", \
         action="store", type="float", help="minimum MIT off-target score for alternative PAMs, default %default", \
         default=ALTPAMMINSCORE)
-    parser.add_option("", "--worker", dest="worker", \
-        action="store_true", help="Run as worker process: watches job queue and runs jobs")
-    #parser.add_option("", "--user", dest="user", \
-        #action="store", help="for the --worker option: switch to this user at program start")
-    parser.add_option("", "--clear", dest="clear", \
-        action="store_true", help="clear the worker job table and exit")
     parser.add_option("-g", "--genomeDir", dest="genomeDir", \
         action="store", help="directory with genomes, default %default", default=genomesDir)
 
     #parser.add_option("-f", "--file", dest="file", action="store", help="run on file") 
     (options, args) = parser.parse_args()
 
-    if len(args)==0 and not options.test and not options.worker and not options.clear:
+    if len(args)==0 :
         parser.print_help()
         sys.exit(0)
 
