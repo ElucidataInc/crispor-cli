@@ -1,0 +1,103 @@
+#!/usr/bin/env python
+from collections import namedtuple
+import os, logging, string
+from os.path import join, isfile
+
+# when many genomes are installed, the list of genome info is better kept in a single
+# file, so it is faster to read.
+
+# this file goes through all subdirectories and collect info from all genomeInfo.tab file and 
+# write to genomes/genomeInfo.all.tab
+# crispor.py will detect if this file is present and use it.
+# do not forget to recreate the file each time you add a genome
+
+# subdirectory with genome info
+genomesDir = "genomes"
+
+def readVarDbs(db):
+    """ find all possible variant VCFs and return as list of (shortLabel, fname, label, hasAF) 
+    hasAF = file has the AF field (allele frequency). Means that the UI
+    will show the "frequency filter" button.
+    """
+    # parse the descriptions of the VCF files
+    # descriptions are optional
+    labelFname = join(genomesDir, db, "vcfDescs.txt")
+    ret = []
+    if isfile(labelFname):
+        for line in open(labelFname):
+            if line.startswith("#"):
+                continue
+            fields = string.split(line.rstrip("\n"), "\t")
+            if len(fields)==4:
+                shortLabel, fname, desc, hasAF = fields
+            else:
+                print labelFname, line
+                assert(False)
+
+            fpath = join(genomesDir, db, fname)
+            if not isfile(fpath):
+                print "Error: Cannot find VCF file %s" % fpath
+                continue
+            hasAF = (hasAF=="1")
+            ret.append( (shortLabel, fname, desc, hasAF) )
+    return ret
+        
+
+def lineFileNext(fh):
+    """ 
+        parses tab-sep file with headers as field names 
+        yields collection.namedtuples
+        strips "#"-prefix from header line
+    """
+    line1 = fh.readline()
+    line1 = line1.strip("\n").strip("#")
+    headers = line1.split("\t")
+    Record = namedtuple('tsvRec', headers)
+   
+    for line in fh:
+        line = line.rstrip("\n")
+        fields = line.split("\t")
+        try:
+            rec = Record(*fields)
+        except Exception, msg:
+            logging.error("Exception occured while parsing line, %s" % msg)
+            logging.error("Filename %s" % fh.name)
+            logging.error("Line was: %s" % repr(line))
+            logging.error("Does number of fields match headers?")
+            logging.error("Headers are: %s" % headers)
+            #raise Exception("wrong field count in line %s" % line)
+            continue
+        # convert fields to correct data type
+        yield rec
+
+fields = ["name","description", "genome", "scientificName", "url", "server"]
+
+tmpFname = join(genomesDir, "genomeInfo.all.tab.tmp")
+outFname = join(genomesDir, "genomeInfo.all.tab")
+
+ofh = open(tmpFname, "w")
+
+ofh.write("\t".join(fields)+"\n")
+for subDir in os.listdir(genomesDir):
+    infoFname = join(genomesDir, subDir, "genomeInfo.tab")
+    varDbs = readVarDbs(subDir)
+    if len(varDbs)!=0:
+        varDescStr = "- SNPs: "+(", ".join([row[0] for row in varDbs]))
+    else:
+        varDescStr = ""
+
+    if not isfile(infoFname):
+        continue
+    for row in lineFileNext(open(infoFname)):
+        newRow = []
+        rowDict = row._asdict()
+        for field in fields:
+            val = rowDict.get(field, "")
+            if field=="description":
+                val += varDescStr
+            newRow.append(val)
+        ofh.write("\t".join(newRow)+"\n")
+ofh.close()
+
+os.rename(tmpFname, outFname)
+print("Recreated %s" % outFname)
