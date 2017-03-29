@@ -1,19 +1,21 @@
-import hashlib, base64,string
 
 from constants import addGenePlasmidsAureus
 
-transTab = string.maketrans("-=/+_", "abcde")
+
 def errAbort(msg):
     " print err msg and exit "
     raise Exception(msg)
     sys.exit(0)  # cgi must not exit with 1
 
 
-def makeTempBase(seq, org, pam, batchName):
-    "create the base name of temp files using a hash function and some prettyfication "
-    hasher = hashlib.sha1(seq+org+pam+batchName)
-    batchId = base64.urlsafe_b64encode(hasher.digest()[0:20]).translate(transTab)[:20]
-    return batchId
+def revComp(seq):
+    " rev-comp a dna sequence with UIPAC characters "
+    revTbl = {'A' : 'T', 'C' : 'G', 'G' : 'C', 'T' : 'A', 'N' : 'N' , 'M' : 'K', 'K' : 'M', 
+        "R" : "Y" , "Y":"R" , "g":"c", "a":"t", "c":"g","t":"a", "n":"n"}
+    newSeq = []
+    for c in reversed(seq):
+        newSeq.append(revTbl[c])
+    return "".join(newSeq)
 
 def makeTempFile(prefix, suffix):
     " return a temporary file that is deleted upon exit, unless DEBUG is set "
