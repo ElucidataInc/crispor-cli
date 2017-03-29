@@ -1,5 +1,8 @@
 import optparse,logging
 import constants as cnst
+import test_functions
+import common_functions
+
 from os.path import join
 
 pamDesc = [ ('NGG','20bp-NGG - Cas9 S. Pyogenes'),
@@ -79,3 +82,39 @@ Command line interface for the Crispor tool.
     else:
         logging.basicConfig(level=logging.INFO)
     return args, options
+
+def handleOptions(options):
+    " set glpbal vars based on options "
+    from constants import DEBUG,doEffScoring,MAXOCC,ALTPAMMINSCORE,maxMMs,useBowtie
+    if options.test:
+        test_functions.runTests()
+        import doctest
+        doctest.testmod()
+        sys.exit(0)
+
+    if options.debug:
+        DEBUG = True
+
+    if options.noEffScores:
+        doEffScoring = False
+
+    # handle the alignment/filtering options
+    if options.maxOcc != None:
+        MAXOCC = options.maxOcc
+
+    if options.minAltPamScore!=None:
+        ALTPAMMINSCORE = options.minAltPamScore
+
+    if options.mismatches:
+        maxMMs = options.mismatches
+
+    if options.bowtie:
+        useBowtie = True
+
+    if options.pam:
+        GUIDELEN,cpf1Mode,addGenePlasmids = common_functions.setupPamInfo(options.pam)
+    argument_list = [DEBUG,doEffScoring,MAXOCC,ALTPAMMINSCORE,maxMMs,
+                            useBowtie,GUIDELEN,cpf1Mode,addGenePlasmids]
+    
+    return argument_list
+
