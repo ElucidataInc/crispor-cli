@@ -15,6 +15,7 @@ import get_offtargets
 import batch_functions
 import sequence_helper_functions
 import scoring_functions
+import cleanup_functions
 
 from bio_functions import *
 from fasta_functions import *
@@ -401,6 +402,8 @@ def mainCommandLine():
     if options.debug:
         logging.info("debug-mode, temporary directory %s will not be deleted" % batchDir)
     else:
+        tmpDirsDelExit=[]
+        delBatchDir = cleanup_functions.delBatchDir(batchDir,tmpDirsDelExit)
         atexit.register(delBatchDir)
 
     # prepare output files
