@@ -1,11 +1,13 @@
-import logging,subprocess,shutil,string
+import logging,subprocess,shutil,string,atexit
 import constants as cnst
-import common_functions
+import common_functions,fasta_functions
 import submit_process
+import scoring_functions,cleanup_functions
 
 from collections import defaultdict, namedtuple
 from basic_imports import *
 from constants import *
+from itertools import product
 
 baseDir = cnst.baseDir
 revComp = common_functions.revComp
@@ -22,7 +24,7 @@ def getOfftargets(seq, org, pam, batchId,batchDir, startDict, queue,process_para
     otBedFname = batchBase+".bed"
     # write potential PAM sites to file 
     faFname = batchBase+".fa"
-    writePamFlank(seq, startDict, pam, faFname)
+    fasta_functions.writePamFlank(seq, startDict, pam, faFname)
     processSubmission(faFname, org, pam, otBedFname, batchBase, batchId, queue,process_parameters)
 
     return otBedFname
@@ -32,10 +34,10 @@ def processSubmission(faFname, genome, pam, bedFname, batchBase, batchId, queue,
     """ search fasta file against genome, filter for pam matches and write to bedFName 
     optionally write status updates to work queue.
     """
-    doEffScoring,useBowtie,cpf1Mode = parameters
+    doEffScoring,useBowtie ,cpf1Mode,batchDir,DEBUG,MAXOCC,ALTPAMMINSCORE,maxMMs,GUIDELEN ,addGenePlasmids= parameters
     if doEffScoring and not cpf1Mode:
         queue.startStep(batchId, "effScores", "Calculating guide efficiency scores")
-        createBatchEffScoreTable(batchId)
+        scoring_functions.createBatchEffScoreTable(batchDir,batchId)
 
     if genome=="noGenome":
         # skip off-target search
@@ -46,33 +48,33 @@ def processSubmission(faFname, genome, pam, bedFname, batchBase, batchId, queue,
         return
 
     if useBowtie:
-        findOfftargetsBowtie(queue, batchId, batchBase, faFname, genome, pam, bedFname)
+        findOfftargetsBowtie(queue, batchId, batchBase, faFname, genome, pam, bedFname,parameters)
     else:
-        findOfftargetsBwa(queue, batchId, batchBase, faFname, genome, pam, bedFname)
+        findOfftargetsBwa(queue, batchId, batchBase, faFname, genome, pam, bedFname,parameters)
 
     return bedFname
 
 
-def debug(msg):
+def debug(msg,DEBUG=False):
     logging.debug(msg)
     if DEBUG:
         print msg
 
-def runCmd(cmd, ignoreExitCode=False):
+def runCmd(cmd, DEBUG=False,ignoreExitCode=False):
     " run shell command, check ret code, replaces BIN and SCRIPTS special variables "
     cmd = cmd.replace("$BIN", binDir)
     cmd = cmd.replace("$SCRIPT", scriptDir)
     cmd = "set -o pipefail; " + cmd
-    debug("Running %s" % cmd)
+    debug(DEBUG,"Running %s" % cmd)
     ret = subprocess.call(cmd, shell=True, executable="/bin/bash")
     if ret!=0 and not ignoreExitCode:
         logging.error("Error: could not run command %s." % cmd)
         sys.exit(1)
 
 
-def findOfftargetsBwa(queue, batchId, batchBase, faFname, genome, pam, bedFname):
+def findOfftargetsBwa(queue, batchId, batchBase, faFname, genome, pam, bedFname,parameters):
     " align faFname to genome and create matchedBedFname "
-    GUIDELEN,cpf1Mode,addGenePlasmids = common_functions.setupPamInfo(pam)
+    doEffScoring,useBowtie ,cpf1Mode,batchDir,DEBUG,MAXOCC,ALTPAMMINSCORE,maxMMs,GUIDELEN,addGenePlasmids = parameters
     matchesBedFname = batchBase+".matches.bed"
     saFname = batchBase+".sa"
     pamLen = len(pam)
@@ -84,9 +86,8 @@ def findOfftargetsBwa(queue, batchId, batchBase, faFname, genome, pam, bedFname)
     seqLen = GUIDELEN
 
     bwaM = MFAC*MAXOCC # -m is queue size in bwa
-    print ("maxDiff",maxDiff)
     cmd = "$BIN/bwa aln -o 0 -m %(bwaM)s -n %(maxDiff)d -k %(maxDiff)d -N -l %(seqLen)d %(genomeDir)s/%(genome)s/%(genome)s.fa %(faFname)s > %(saFname)s" % locals()
-    runCmd(cmd)
+    runCmd(cmd,DEBUG)
 
     queue.startStep(batchId, "saiToBed", convertMsg)
     maxOcc = MAXOCC # create local var from global
@@ -94,7 +95,7 @@ def findOfftargetsBwa(queue, batchId, batchBase, faFname, genome, pam, bedFname)
     # the sorting should improve the twoBitToFa runtime
 
     cmd = "$BIN/bwa samse -n %(maxOcc)d %(genomeDir)s/%(genome)s/%(genome)s.fa %(saFname)s %(faFname)s | $SCRIPT/xa2multi.pl | $SCRIPT/samToBed %(pam)s | sort -k1,1 -k2,2n | $BIN/bedClip stdin %(genomeDir)s/%(genome)s/%(genome)s.sizes stdout >> %(matchesBedFname)s " % locals()
-    runCmd(cmd)
+    runCmd(cmd,DEBUG)
 
     # arguments: guideSeq, mainPat, altPats, altScore, passX1Score
     filtMatchesBedFname = batchBase+".filtMatches.bed"
@@ -106,7 +107,7 @@ def findOfftargetsBwa(queue, batchId, batchBase, faFname, genome, pam, bedFname)
     # twoBitToFa was 15x slower than python's twobitreader, after markd's fix it should be OK
     cmd = "$BIN/twoBitToFa %(genomeDir)s/%(genome)s/%(genome)s.2bit stdout -bed=%(matchesBedFname)s | $SCRIPT/filterFaToBed %(faFname)s %(pam)s %(altPats)s %(altPamMinScore)s %(maxOcc)d > %(filtMatchesBedFname)s" % locals()
     #cmd = "$SCRIPT/twoBitToFaPython %(genomeDir)s/%(genome)s/%(genome)s.2bit %(matchesBedFname)s | $SCRIPT/filterFaToBed %(faFname)s %(pam)s %(altPats)s %(altPamMinScore)s %(maxOcc)d > %(filtMatchesBedFname)s" % locals()
-    runCmd(cmd)
+    runCmd(cmd,DEBUG)
 
     segFname = "%(genomeDir)s/%(genome)s/%(genome)s.segments.bed" % locals()
 
@@ -114,7 +115,7 @@ def findOfftargetsBwa(queue, batchId, batchBase, faFname, genome, pam, bedFname)
     if isfile(segFname):
         queue.startStep(batchId, "genes", "Annotating matches with genes")
         cmd = "cat %(filtMatchesBedFname)s | $BIN/overlapSelect %(segFname)s stdin stdout -mergeOutput -selectFmt=bed -inFmt=bed | cut -f1,2,3,4,8 2> %(batchBase)s.log > %(bedFnameTmp)s " % locals()
-        runCmd(cmd)
+        runCmd(cmd,DEBUG)
     else:
         queue.startStep(batchId, "chromPos", "Annotating matches with chromosome position")
         annotateBedWithPos(filtMatchesBedFname, bedFnameTmp)
@@ -127,16 +128,17 @@ def findOfftargetsBwa(queue, batchId, batchBase, faFname, genome, pam, bedFname)
 
 
 
-def findOfftargetsBowtie(queue, batchId, batchBase, faFname, genome, pamPat, bedFname):
+def findOfftargetsBowtie(queue, batchId, batchBase, faFname, genome, pamPat, bedFname,parameters):
     " align guides with pam in faFname to genome and write off-targets to bedFname "
+    doEffScoring,useBowtie ,cpf1Mode,batchDir,DEBUG,MAXOCC,ALTPAMMINSCORE,maxMMs,GUIDELEN,addGenePlasmids = parameters
     tmpDir = batchBase+".bowtie.tmp"
     os.mkdir(tmpDir)
 
     # make sure this directory gets removed, no matter what
-    global tmpDirsDelExit
+    tmpDirsDelExit=[]
     tmpDirsDelExit.append(tmpDir)
     if not DEBUG:
-        atexit.register(delTmpDirs)
+        atexit.register(cleanup_functions.delTmpDirs,batchDir,tmpDirsDelExit)
 
     # write out the sequences for bowtie
     queue.startStep(batchId, "seqPrep", "preparing sequences")
@@ -161,7 +163,7 @@ def findOfftargetsBowtie(queue, batchId, batchBase, faFname, genome, pamPat, bed
     # --mm = use mmap
     maxOcc = MAXOCC # meaning in BWA: includes any PAM, in bowtie we have the PAM in the input sequence
     cmd = "$BIN/bowtie %(genomePath)s -f %(bwFaFname)s  -v 3 -y -t -k %(maxOcc)d -m %(maxOcc)d dummy --max tooManyHits.txt --mm --refout --maxbts=2000 -p 4" % locals()
-    runCmd(cmd)
+    runCmd(cmd,DEBUG)
     os.chdir(oldCwd)
 
     queue.startStep(batchId, "parse", "parsing alignments")
@@ -236,7 +238,7 @@ def findOfftargetsBowtie(queue, batchId, batchBase, faFname, genome, pamPat, bed
 
     # annotate with genome locus names
     cmd = "$BIN/overlapSelect %(segFname)s %(tempBedPath)s stdout -mergeOutput -selectFmt=bed -inFmt=bed | cut -f1,2,3,4,8 > %(tmpAnnotOffsPath)s" % locals()
-    runCmd(cmd)
+    runCmd(cmd,DEBUG)
 
     shutil.move(tmpAnnotOffsPath, bedFname)
     queue.startStep(batchId, "done", "Job completed")
@@ -248,41 +250,6 @@ def findOfftargetsBowtie(queue, batchId, batchBase, faFname, genome, pamPat, bed
 
 
 
-def flankSeqIter(seq, startDict, pam, doFilterNs):
-    """ given a seq and dictionary of pos -> strand and the length of the pamSite
-    yield tuples of (name, pamStart, guideStart, strand, flankSeq, pamSeq)
-
-    if doFilterNs is set, will not return any sequences that contain an N character
-    """
-    pamLen = len(pam)
-    GUIDELEN,cpf1Mode,addGenePlasmids = common_functions.setupPamInfo(pam)
-    startList = sorted(startDict.keys())
-    for pamStart in startList:
-        strand = startDict[pamStart]
-
-        if cpf1Mode: # Cpf1: get the sequence to the right of the PAM
-            if strand=="+":
-                guideStart = pamStart+pamLen
-                flankSeq = seq[guideStart:guideStart+GUIDELEN]
-                pamSeq = seq[pamStart:pamStart+pamLen]
-            else: # strand is minus
-                guideStart = pamStart-GUIDELEN
-                flankSeq = revComp(seq[guideStart:pamStart])
-                pamSeq = revComp(seq[pamStart:pamStart+pamLen])
-        else: # common case: get the sequence on the left side of the PAM
-            if strand=="+":
-                guideStart = pamStart-GUIDELEN
-                flankSeq = seq[guideStart:pamStart]
-                pamSeq = seq[pamStart:pamStart+pamLen]
-            else: # strand is minus
-                guideStart = pamStart+pamLen
-                flankSeq = revComp(seq[guideStart:guideStart+GUIDELEN])
-                pamSeq = revComp(seq[pamStart:pamStart+pamLen])
-
-        if "N" in flankSeq and doFilterNs:
-            continue
-
-        yield "s%d%s" % (pamStart, strand), pamStart, guideStart, strand, flankSeq, pamSeq
 
 
 def highlightMismatches(guide, offTarget, pamLen):
@@ -360,13 +327,7 @@ def parseOfftargets(bedFname):
 
     return indexedOts
 
-def writePamFlank(seq, startDict, pam, faFname):
-    " write pam flanking sequences to fasta file, optionally with versions where each nucl is removed "
-    #print "writing pams to %s<br>" % faFname
-    faFh = open(faFname, "w")
-    for pamId, pamStart, guideStart, strand, flankSeq, pamSeq in flankSeqIter(seq, startDict, pam, True):
-        faFh.write(">%s\n%s\n" % (pamId, flankSeq))
-    faFh.close()
+
 
 
 def annotateBedWithPos(inBed, outBed):
@@ -391,3 +352,77 @@ def annotateBedWithPos(inBed, outBed):
         ofh.write("\n")
     ofh.close()
 
+def writeBowtieSequences(inFaFname, outFname, pamPat):
+    """ write the sequence and one-bp-distant-sequences + all possible PAM sequences to outFname 
+    Return dict querySeqId -> querySeq and a list of all
+    possible PAMs, as nucleotide sequences (not IUPAC-patterns)
+    """
+    ofh = open(outFname, "w")
+    outCount = 0
+    inCount = 0
+    guideSeqs = {} # 20mer guide sequences
+    qSeqs = {} # 23mer query sequences for bowtie, produced by expanding guide sequences
+    allPamSeqs = expandIupac(pamPat)
+    for seqId, seq in parseFastaAsList(open(inFaFname)):
+        inCount += 1
+        guideSeqs[seqId] = seq
+        for pamSeq in allPamSeqs:
+            # the input sequence + the PAM
+            newSeqId = "%s.%s" % (seqId, pamSeq)
+            newFullSeq = seq+pamSeq
+            ofh.write(">%s\n%s\n" % (newSeqId, newFullSeq))
+            qSeqs[newSeqId] = newFullSeq
+
+            # all one-bp mutations of the input sequence + the PAM
+            for nPos, fromNucl, toNucl, newSeq in makeVariants(seq):
+                newSeqId = "%s.%s.%d:%s>%s" % (seqId, pamSeq, nPos, fromNucl, toNucl)
+                newFullSeq = newSeq+pamSeq
+                ofh.write(">%s\n%s\n" % (newSeqId, newFullSeq))
+                qSeqs[newSeqId] = newFullSeq
+                outCount += 1
+    ofh.close()
+    logging.debug("Wrote %d variants+expandedPam of %d sequences to %s" % (outCount, inCount, outFname))
+    return guideSeqs, qSeqs, allPamSeqs
+
+def parseFastaAsList(fileObj):
+    " parse a fasta file, return list (id, seq) "
+    seqs = []
+    parts = []
+    seqId = None
+    for line in fileObj:
+        line = line.rstrip("\n")
+        if line.startswith(">"):
+            if seqId!=None:
+                seqs.append( (seqId, "".join(parts)) )
+            seqId = line.lstrip(">")
+            parts = []
+        else:
+            parts.append(line)
+    if len(parts)!=0:
+        seqs.append( (seqId, "".join(parts)) )
+    return seqs
+
+def expandIupac(seq):
+    """ expand all IUPAC characters to nucleotides, returns list. 
+    >>> expandIupac("NY")
+    ['GC', 'GT', 'AC', 'AT', 'TC', 'TT', 'CC', 'CT']
+    """
+    # http://stackoverflow.com/questions/27551921/how-to-extend-ambiguous-dna-sequence
+    d = {'A': 'A', 'C': 'C', 'B': 'CGT', 'D': 'AGT', 'G': 'G', \
+        'H': 'ACT', 'K': 'GT', 'M': 'AC', 'N': 'GATC', 'S': 'CG', \
+        'R': 'AG', 'T': 'T', 'W': 'AT', 'V': 'ACG', 'Y': 'CT', 'X': 'GATC'}
+    seqs = []
+    for i in product(*[d[j] for j in seq]):
+       seqs.append("".join(i))
+    return seqs
+
+def makeVariants(seq):
+    " generate all possible variants of sequence at 1bp-distance"
+    seqs = []
+    for i in range(0, len(seq)):
+        for l in "ACTG":
+            if l==seq[i]:
+                continue
+            newSeq = seq[:i]+l+seq[i+1:]
+            seqs.append((i, seq[i], l, newSeq))
+    return seqs
