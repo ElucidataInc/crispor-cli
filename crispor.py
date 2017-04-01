@@ -65,7 +65,9 @@ def mainCommandLine():
     # different genomes directory?
     if options.genomeDir != None:
         genomesDir = options.genomeDir
-
+    if options.bulge_size !=None:
+        indel_len = options.bulge_size
+        
     # get sequence
     seqs = batch_functions.parseFasta(open(inSeqFname))
 
@@ -106,7 +108,7 @@ def mainCommandLine():
         startDict, endSet = findAllPams(seq, pam)
         process_parameters = [doEffScoring,useBowtie ,cpf1Mode,batchDir,DEBUG,
                                 MAXOCC,ALTPAMMINSCORE,maxMMs,GUIDELEN,addGenePlasmids]
-        otBedFname = get_offtargets.getOfftargets(seq, org, pam, batchId, batchDir,startDict, ConsQueue(),process_parameters)
+        otBedFname = get_offtargets.getOfftargets(seq, org, pam, batchId, batchDir,startDict, ConsQueue(),indel_len,process_parameters)
         otMatches = get_offtargets.parseOfftargets(otBedFname)
         if options.noEffScores or cpf1Mode:
             effScores = {}
