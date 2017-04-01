@@ -1,6 +1,15 @@
-import pickle,re
+import batch_functions
+import common_functions
+import crisporEffScores
+import fasta_functions
+import json
+import logging
+import pickle
+import re
+import sequence_helper_functions
 
-from os.path import join,dirname
+from collections import defaultdict, namedtuple
+from os.path import join,dirname,isfile
 
 
 
@@ -138,8 +147,8 @@ def calcGuideEffScores(seq, extSeq, pam):
     if extSeq:
         extSeq = extSeq.upper()
 
-    startDict, endSet = findAllPams(seq, pam)
-    pamInfo = list(flankSeqIter(seq, startDict, pam, False))
+    startDict, endSet = fasta_functions.findAllPams(seq, pam)
+    pamInfo = list(fasta_functions.flankSeqIter(seq, startDict, pam, False))
 
     guideIds = []
     guides = []
@@ -147,7 +156,7 @@ def calcGuideEffScores(seq, extSeq, pam):
     for pamId, startPos, guideStart, strand, guideSeq, pamSeq in pamInfo:
         guides.append(guideSeq+pamSeq)
         gStart, gEnd = pamStartToGuideRange(startPos, strand, len(pam),cpf1Mode,GUIDELEN)
-        longSeq = getExtSeq(seq, gStart, gEnd, strand, 50-GUIDELEN, 50, extSeq)
+        longSeq = sequence_helper_functions.getExtSeq(seq, gStart, gEnd, strand, 50-GUIDELEN, 50, extSeq)
         if longSeq!=None:
             longSeqs.append(longSeq)
             guideIds.append(pamId)
@@ -273,3 +282,50 @@ def lineFileNext(fh):
             continue
         # convert fields to correct data type
         yield rec
+
+def readBatchParams(batchDir,batchId):
+    """ given a batchId, return the genome, the pam, the input sequence and the
+    chrom pos and extSeq, a 100bp-extended version of the input sequence.
+    Returns None for pos if not found. """
+
+    batchBase = join(batchDir, batchId)
+    jsonFname = batchBase+".json"
+    if isfile(jsonFname):
+        params = json.load(open(jsonFname))
+        global batchName
+        batchName = params["batchName"]
+        return params["seq"], params["org"], params["pam"], params["posStr"], params["extSeq"]
+
+    # FROM HERE UP TO END OF FUNCTION: legacy cold for old batches
+    # remove in 2017
+    inputFaFname = batchBase+".input.fa"
+    if not isfile(inputFaFname):
+        errAbort('Could not find the batch %s. We cannot keep Crispor runs for more than '
+                'a few months. Please resubmit your input sequence via'
+            ' <a href="crispor.py">the query input form</a>' % batchId)
+
+    ifh = open(inputFaFname)
+    ifhFields = ifh.readline().replace(">","").strip().split()
+    if len(ifhFields)==2:
+        genome, pamSeq = ifhFields
+        position = None
+    else:
+        genome, pamSeq, position = ifhFields
+
+    inSeq = ifh.readline().strip()
+
+    ifh.seek(0)
+    seqs = parseFasta(ifh)
+    ifh.close()
+
+    extSeq = None
+    if "extSeq" in seqs:
+        extSeq = seqs["extSeq"]
+
+    # older batch files don't include a position yet
+    if position==None:
+        position = batch_functions.coordsToPosStr(*findBestMatch(genome, inSeq))
+
+    return inSeq, genome, pamSeq, position, extSeq
+
+
