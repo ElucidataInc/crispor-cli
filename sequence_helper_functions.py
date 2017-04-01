@@ -1,7 +1,9 @@
+import fasta_functions
+
 from os.path import join
 from constants import baseDir
 from collections import defaultdict, namedtuple
-    
+
 def getExtSeq(seq, start, end, strand, extUpstream, extDownstream, extSeq=None, extFlank=100):
     """ extend (start,end) by extUpstream and extDownstream and return the subsequence
     at this position in seq.
@@ -47,7 +49,7 @@ def getExtSeq(seq, start, end, strand, extUpstream, extDownstream, extSeq=None, 
         subSeq = extSeq[extStart:extEnd]
 
     if strand=="-":
-        subSeq = revComp(subSeq)
+        subSeq = fasta_functions.revComp(subSeq)
 
     return subSeq
 
