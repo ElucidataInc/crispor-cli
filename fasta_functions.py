@@ -160,3 +160,57 @@ def matchNuc(pat, nuc):
         return True
     else:
         return False
+
+def findAllPams(seq, pam):
+    """ find all matches for PAM and return as dict startPos -> strand and a set
+    of end positions
+    """
+    seq = seq.upper()
+    startDict, endSet = findPams(seq, pam, "+", {}, set())
+    startDict, endSet = findPams(seq, common_functions.revComp(pam), "-", startDict, endSet)
+    return startDict, endSet
+
+def writePamFlank(seq, startDict, pam, faFname):
+    " write pam flanking sequences to fasta file, optionally with versions where each nucl is removed "
+    #print "writing pams to %s<br>" % faFname
+    faFh = open(faFname, "w")
+    for pamId, pamStart, guideStart, strand, flankSeq, pamSeq in flankSeqIter(seq, startDict, pam, True):
+        faFh.write(">%s\n%s\n" % (pamId, flankSeq))
+    faFh.close()
+
+def flankSeqIter(seq, startDict, pam, doFilterNs):
+    """ given a seq and dictionary of pos -> strand and the length of the pamSite
+    yield tuples of (name, pamStart, guideStart, strand, flankSeq, pamSeq)
+
+    if doFilterNs is set, will not return any sequences that contain an N character
+    """
+    pamLen = len(pam)
+    GUIDELEN,cpf1Mode,addGenePlasmids = common_functions.setupPamInfo(pam)
+    startList = sorted(startDict.keys())
+    for pamStart in startList:
+        strand = startDict[pamStart]
+
+        if cpf1Mode: # Cpf1: get the sequence to the right of the PAM
+            if strand=="+":
+                guideStart = pamStart+pamLen
+                flankSeq = seq[guideStart:guideStart+GUIDELEN]
+                pamSeq = seq[pamStart:pamStart+pamLen]
+            else: # strand is minus
+                guideStart = pamStart-GUIDELEN
+                flankSeq = revComp(seq[guideStart:pamStart])
+                pamSeq = revComp(seq[pamStart:pamStart+pamLen])
+        else: # common case: get the sequence on the left side of the PAM
+            if strand=="+":
+                guideStart = pamStart-GUIDELEN
+                flankSeq = seq[guideStart:pamStart]
+                pamSeq = seq[pamStart:pamStart+pamLen]
+            else: # strand is minus
+                guideStart = pamStart+pamLen
+                flankSeq = revComp(seq[guideStart:guideStart+GUIDELEN])
+                pamSeq = revComp(seq[pamStart:pamStart+pamLen])
+
+        if "N" in flankSeq and doFilterNs:
+            continue
+
+        yield "s%d%s" % (pamStart, strand), pamStart, guideStart, strand, flankSeq, pamSeq
+
