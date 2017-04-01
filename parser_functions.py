@@ -56,6 +56,8 @@ Command line interface for the Crispor tool.
         action="store", help="write offtarget info to this filename")
     parser.add_option("-m", "--maxOcc", dest="maxOcc", \
         action="store", type="int", help="MAXOCC parameter, guides with more matches are excluded")
+    parser.add_option("-i", "--indel", dest="bulge_size", \
+        action="store", type="int", help="indel parameter, offtargets with wider gaps are excluded")
     parser.add_option("", "--mm", dest="mismatches", \
         action="store", type="int", help="maximum number of mismatches, default %default", default=4)
     parser.add_option("", "--skipAlign", dest="skipAlign", \
