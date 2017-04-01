@@ -15,7 +15,7 @@ revComp = common_functions.revComp
 genomesDir = join(baseDir, "genomes")
 
 
-def getOfftargets(seq, org, pam, batchId,batchDir, startDict, queue,process_parameters):
+def getOfftargets(seq, org, pam, batchId,batchDir, startDict, queue,indel_len,process_parameters):
     """ write guides to fasta and run bwa or use cached results.
     Return name of the BED file with the matches.
     Write progress status updates to queue object.
@@ -25,12 +25,12 @@ def getOfftargets(seq, org, pam, batchId,batchDir, startDict, queue,process_para
     # write potential PAM sites to file 
     faFname = batchBase+".fa"
     fasta_functions.writePamFlank(seq, startDict, pam, faFname)
-    processSubmission(faFname, org, pam, otBedFname, batchBase, batchId, queue,process_parameters)
+    processSubmission(faFname, org, pam, otBedFname, batchBase, batchId, queue,indel_len,process_parameters)
 
     return otBedFname
 
 
-def processSubmission(faFname, genome, pam, bedFname, batchBase, batchId, queue,parameters):
+def processSubmission(faFname, genome, pam, bedFname, batchBase, batchId, queue,indel_len,parameters):
     """ search fasta file against genome, filter for pam matches and write to bedFName 
     optionally write status updates to work queue.
     """
@@ -50,7 +50,7 @@ def processSubmission(faFname, genome, pam, bedFname, batchBase, batchId, queue,
     if useBowtie:
         findOfftargetsBowtie(queue, batchId, batchBase, faFname, genome, pam, bedFname,parameters)
     else:
-        findOfftargetsBwa(queue, batchId, batchBase, faFname, genome, pam, bedFname,parameters)
+        findOfftargetsBwa(queue, batchId, batchBase, faFname, genome, pam, bedFname,indel_len,parameters)
 
     return bedFname
 
@@ -72,7 +72,7 @@ def runCmd(cmd, DEBUG=False,ignoreExitCode=False):
         sys.exit(1)
 
 
-def findOfftargetsBwa(queue, batchId, batchBase, faFname, genome, pam, bedFname,parameters):
+def findOfftargetsBwa(queue, batchId, batchBase, faFname, genome, pam, bedFname,indel_len,parameters):
     " align faFname to genome and create matchedBedFname "
     doEffScoring,useBowtie ,cpf1Mode,batchDir,DEBUG,MAXOCC,ALTPAMMINSCORE,maxMMs,GUIDELEN,addGenePlasmids = parameters
     matchesBedFname = batchBase+".matches.bed"
@@ -86,17 +86,20 @@ def findOfftargetsBwa(queue, batchId, batchBase, faFname, genome, pam, bedFname,
     seqLen = GUIDELEN
 
     bwaM = MFAC*MAXOCC # -m is queue size in bwa
-    cmd = "$BIN/bwa aln -o 0 -m %(bwaM)s -n %(maxDiff)d -k %(maxDiff)d -N -l %(seqLen)d %(genomeDir)s/%(genome)s/%(genome)s.fa %(faFname)s > %(saFname)s" % locals()
+    cmd = "$BIN/bwa aln -o %(indel_len)d -m %(bwaM)s -n %(maxDiff)d -k %(maxDiff)d -N -l %(seqLen)d %(genomeDir)s/%(genome)s/%(genome)s.fa %(faFname)s > %(saFname)s" % locals()
+
     runCmd(cmd,DEBUG)
 
     queue.startStep(batchId, "saiToBed", convertMsg)
     maxOcc = MAXOCC # create local var from global
     # EXTRACTION OF POSITIONS + CONVERSION + SORT/CLIP
     # the sorting should improve the twoBitToFa runtime
-
-    cmd = "$BIN/bwa samse -n %(maxOcc)d %(genomeDir)s/%(genome)s/%(genome)s.fa %(saFname)s %(faFname)s | $SCRIPT/xa2multi.pl | $SCRIPT/samToBed %(pam)s | sort -k1,1 -k2,2n | $BIN/bedClip stdin %(genomeDir)s/%(genome)s/%(genome)s.sizes stdout >> %(matchesBedFname)s " % locals()
+    samtobed_file = 'samToBed'
+    if indel_len != 0:
+        samtobed_file = 'samToBedindel'
+    cmd = "$BIN/bwa samse -n %(maxOcc)d %(genomeDir)s/%(genome)s/%(genome)s.fa %(saFname)s %(faFname)s | $SCRIPT/xa2multi.pl | $SCRIPT/%(samtobed_file)s %(pam)s | sort -k1,1 -k2,2n | $BIN/bedClip stdin %(genomeDir)s/%(genome)s/%(genome)s.sizes stdout >> %(matchesBedFname)s " % locals()
     runCmd(cmd,DEBUG)
-
+    print ("samse command.....",cmd)
     # arguments: guideSeq, mainPat, altPats, altScore, passX1Score
     filtMatchesBedFname = batchBase+".filtMatches.bed"
     queue.startStep(batchId, "filter", "Removing matches without a PAM motif")
@@ -105,7 +108,12 @@ def findOfftargetsBwa(queue, batchId, batchBase, faFname, genome, pam, bedFname,
     altPamMinScore = str(ALTPAMMINSCORE)
     # EXTRACTION OF SEQUENCES + ANNOTATION
     # twoBitToFa was 15x slower than python's twobitreader, after markd's fix it should be OK
-    cmd = "$BIN/twoBitToFa %(genomeDir)s/%(genome)s/%(genome)s.2bit stdout -bed=%(matchesBedFname)s | $SCRIPT/filterFaToBed %(faFname)s %(pam)s %(altPats)s %(altPamMinScore)s %(maxOcc)d > %(filtMatchesBedFname)s" % locals()
+    # cmd = "$BIN/twoBitToFa %(genomeDir)s/%(genome)s/%(genome)s.2bit stdout -bed=%(matchesBedFname)s | $SCRIPT/filterFaToBed %(faFname)s %(pam)s %(altPats)s %(altPamMinScore)s %(maxOcc)d > %(filtMatchesBedFname)s" % locals()
+    if indel_len !=0:
+        cmd = "$SCRIPT/twoBitToFaPythonindel %(genomeDir)s/%(genome)s/%(genome)s.2bit  %(matchesBedFname)s | $SCRIPT/filterFaToBedindel %(faFname)s NNN  > %(filtMatchesBedFname)s" % locals()
+    else : 
+        cmd = "$BIN/twoBitToFa %(genomeDir)s/%(genome)s/%(genome)s.2bit stdout -bed=%(matchesBedFname)s | $SCRIPT/filterFaToBed %(faFname)s %(pam)s %(altPats)s %(altPamMinScore)s %(maxOcc)d > %(filtMatchesBedFname)s" % locals()
+    print("filterfa and 2bit command.....",cmd)
     #cmd = "$SCRIPT/twoBitToFaPython %(genomeDir)s/%(genome)s/%(genome)s.2bit %(matchesBedFname)s | $SCRIPT/filterFaToBed %(faFname)s %(pam)s %(altPats)s %(altPamMinScore)s %(maxOcc)d > %(filtMatchesBedFname)s" % locals()
     runCmd(cmd,DEBUG)
 
