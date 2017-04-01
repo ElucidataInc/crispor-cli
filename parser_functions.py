@@ -1,4 +1,4 @@
-import optparse,logging
+import optparse,logging,sys
 import constants as cnst
 import test_functions
 import common_functions
@@ -58,8 +58,6 @@ Command line interface for the Crispor tool.
         action="store", type="int", help="MAXOCC parameter, guides with more matches are excluded")
     parser.add_option("", "--mm", dest="mismatches", \
         action="store", type="int", help="maximum number of mismatches, default %default", default=4)
-    parser.add_option("", "--bowtie", dest="bowtie", \
-        action="store_true", help="new: use bowtie as the aligner. Do not use. Bowtie misses many off-targets.")
     parser.add_option("", "--skipAlign", dest="skipAlign", \
         action="store_true", help="do not align the input sequence. The on-target will be a random match with 0 mismatches.")
     parser.add_option("", "--noEffScores", dest="noEffScores", \
@@ -108,8 +106,8 @@ def handleOptions(options):
     if options.mismatches:
         maxMMs = options.mismatches
 
-    if options.bowtie:
-        useBowtie = True
+    # if options.bowtie:
+    #     useBowtie = True
 
     if options.pam:
         GUIDELEN,cpf1Mode,addGenePlasmids = common_functions.setupPamInfo(options.pam)
