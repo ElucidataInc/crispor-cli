@@ -9,13 +9,14 @@ import subprocess, tempfile, logging, atexit, glob, shutil
 import Cookie, time, sys, cgi, re, random, platform, os
 import hashlib, base64, string, operator, urllib, sqlite3, time
 import traceback,  pwd, pickle
-import common_functions
-import parser_functions
-import get_offtargets
 import batch_functions
+import cleanup_functions
+import common_functions
+import fasta_functions
+import get_offtargets
+import parser_functions
 import sequence_helper_functions
 import scoring_functions
-import cleanup_functions
 
 from bio_functions import *
 from fasta_functions import *
@@ -234,14 +235,14 @@ def mergeGuideInfo(seq, startDict, pamPat, otMatches, inputPos, effScores, sortB
     guideScores = {}
     hasNotFound = False
 
-    pamSeqs = list(get_offtargets.flankSeqIter(seq, startDict, pamPat, True))
+    pamSeqs = list(fasta_functions.flankSeqIter(seq, startDict, pamPat, True))
 
     for pamId, pamStart, guideStart, strand, guideSeq, pamSeq in pamSeqs:
         # matches in genome
         # one desc in last column per OT seq
         if pamId in otMatches:
             pamMatches = otMatches[pamId]
-            guideSeqFull = concatGuideAndPam(guideSeq, pamSeq)
+            guideSeqFull = sequence_helper_functions.concatGuideAndPam(guideSeq, pamSeq)
             mutEnzymes = sequence_helper_functions.matchRestrEnz(allEnzymes, guideSeq, pamSeq)
             posList, otDesc, guideScore, guideCfdScore, last12Desc, ontargetDesc, \
                subOptMatchCount = \
@@ -299,14 +300,7 @@ allGenomes = None
 
 
 
-def findAllPams(seq, pam):
-    """ find all matches for PAM and return as dict startPos -> strand and a set
-    of end positions
-    """
-    seq = seq.upper()
-    startDict, endSet = findPams(seq, pam, "+", {}, set())
-    startDict, endSet = findPams(seq, common_functions.revComp(pam), "-", startDict, endSet)
-    return startDict, endSet
+
 
 
 
@@ -403,8 +397,8 @@ def mainCommandLine():
         logging.info("debug-mode, temporary directory %s will not be deleted" % batchDir)
     else:
         tmpDirsDelExit=[]
-        delBatchDir = cleanup_functions.delBatchDir(batchDir,tmpDirsDelExit)
-        atexit.register(delBatchDir)
+        delBatchDir = cleanup_functions.delBatchDir
+        atexit.register(delBatchDir,batchDir,tmpDirsDelExit)
 
     # prepare output files
     guideFh = open(join(batchDir, "guideInfo.tab"), "w")
@@ -429,14 +423,15 @@ def mainCommandLine():
             logging.error("no match found for sequence %s in genome %s" % (inSeqFname, org))
 
         startDict, endSet = findAllPams(seq, pam)
-        process_parameters = [doEffScoring,useBowtie ,cpf1Mode]
+        process_parameters = [doEffScoring,useBowtie ,cpf1Mode,batchDir,DEBUG,
+                                MAXOCC,ALTPAMMINSCORE,maxMMs,GUIDELEN,addGenePlasmids]
         otBedFname = get_offtargets.getOfftargets(seq, org, pam, batchId, batchDir,startDict, ConsQueue(),process_parameters)
         otMatches = get_offtargets.parseOfftargets(otBedFname)
 
         if options.noEffScores or cpf1Mode:
             effScores = {}
         else:
-            effScores = readEffScores(batchDir,batchId)
+            effScores = scoring_functions.readEffScores(batchDir,batchId)
 
         guideData, guideScores, hasNotFound = \
             mergeGuideInfo(seq, startDict, pam, otMatches, position, effScores)
