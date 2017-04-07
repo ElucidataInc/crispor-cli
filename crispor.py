@@ -9,21 +9,13 @@ import subprocess, tempfile, logging, atexit, glob, shutil
 import Cookie, time, sys, cgi, re, random, platform, os
 import hashlib, base64, string, operator, urllib, sqlite3, time
 import traceback,  pwd, pickle
-import batch_functions
-import cleanup_functions
-import common_functions
-import fasta_functions
-import get_offtargets
-import parser_functions
-import sequence_helper_functions
-import scoring_functions
-import finishing_functions
+from functions import *
 
 from bio_functions import *
-from fasta_functions import *
-from common_functions import *
-from basic_imports import *
-from constants import *
+from functions.fasta_functions import *
+from functions.common_functions import *
+from functions.basic_imports import *
+from functions.constants import *
 from collections import defaultdict, namedtuple
 from datetime import datetime
 from itertools import product
