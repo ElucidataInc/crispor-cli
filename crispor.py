@@ -17,7 +17,7 @@ import get_offtargets
 import parser_functions
 import sequence_helper_functions
 import scoring_functions
-import extra_functions
+import finishing_functions
 
 from bio_functions import *
 from fasta_functions import *
@@ -116,15 +116,15 @@ def mainCommandLine():
             effScores = scoring_functions.readEffScores(batchDir,batchId)
 
         guideData, guideScores, hasNotFound = \
-            extra_functions.mergeGuideInfo(seq, startDict, pam, otMatches, position, effScores,argument_list)
+            finishing_functions.mergeGuideInfo(seq, startDict, pam, otMatches, position, effScores,argument_list)
 
-        for row in extra_functions.iterGuideRows(guideData,addHeaders=True):
+        for row in finishing_functions.iterGuideRows(guideData,addHeaders=True):
             print("row....",row,'\n')
             guideFh.write("\t".join(row))
             guideFh.write("\n")
 
         if options.offtargetFname:
-            for row in extra_functions.iterOfftargetRows(guideData):
+            for row in finishing_functions.iterOfftargetRows(guideData):
                 offtargetFh.write("\t".join(row))
                 offtargetFh.write("\n")
 
