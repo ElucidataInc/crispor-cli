@@ -11,7 +11,9 @@ from published articles, see the file crisporEffScores.py for the exact referenc
 Installation of the package:
 
     make crispor_env
+
     source crispor_env/bin/activate
+
     make devbuild
 
 Install required R libraries:
@@ -22,6 +24,7 @@ Install required R libraries:
 Now in a python console type this:
 
     from crispor_cli import crispor
+    
     crispor.main(args,options)
 
 Description for args and options is given below:
