@@ -1,0 +1,8 @@
+./style/tefor/style_general.css    
+./style/tefor/squeleton.css    
+./style/tefor/menu.css
+./style/tefor/menuSpec.css
+./style/tefor/logo.css
+./style/tefor/personnalfont.css
+./style/tefor/button.css
+./style/style.css
