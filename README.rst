@@ -8,7 +8,8 @@ CRISPOR uses BWA, a few tools from the UCSC Genome Browser (twoBitToFa, bedClip)
 various R packages and a huge collection of external packages and source code files
 from published articles, see the file crisporEffScores.py for the exact references.
 
-# Installation of the package:
+Installation of the package:
+
     make crispor_env
     source crispor_env/bin/activate
     make devbuild
@@ -19,8 +20,10 @@ Install required R libraries:
     sudo Rscript -e 'source("https://bioconductor.org/biocLite.R"); biocLite(c("limma"));'
 
 Now in a python console type this:
+
     from crispor_cli import crispor
     crispor.main(args,options)
+
 Description for args and options is given below:
   args=[<genome_name>,<input_fasta>,<output_file>]
 Here args is a list containing org,fastaInFile and guideOutFile in this order:
