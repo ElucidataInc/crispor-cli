@@ -8,35 +8,31 @@ CRISPOR uses BWA, a few tools from the UCSC Genome Browser (twoBitToFa, bedClip)
 various R packages and a huge collection of external packages and source code files
 from published articles, see the file crisporEffScores.py for the exact references.
 
-If you only need efficiency scores and no interactive website, try "python
-crisporEffScores.py", it is a python module but also has a command line
-interface that may be sufficient for programmers.
-
 # Installation of the package:
-
-make crispor_env
-source crispor_env/bin/activate
-make devbuild
+    make crispor_env
+    source crispor_env/bin/activate
+    make devbuild
 
 Install required R libraries:
    
     sudo Rscript -e 'install.packages(c("e1071"),  repos="http://cran.rstudio.com/")'
     sudo Rscript -e 'source("https://bioconductor.org/biocLite.R"); biocLite(c("limma"));'
 
-Now in a python console type this-
-
-from crispor_cli import crispor
-crispor.main(args,options)
-
-args=[<genome_name>,<input_fasta>,<output_file>]
-Here args is a list containing org,fastaInFile and guideOutFile in this order.
-Example args -
-args=['sacCer3','/input/guide_yeast.fasta','/output/yo_guide.tsv']
+Now in a python console type this:
+    from crispor_cli import crispor
+    crispor.main(args,options)
+Description for args and options is given below:
+  args=[<genome_name>,<input_fasta>,<output_file>]
+Here args is a list containing org,fastaInFile and guideOutFile in this order:
+  Example args -
+    args=['sacCer3','/input/guide_yeast.fasta','/output/yo_guide.tsv']
 
 And options is a dictionary containing all the extra options permitted by crispor.
-Example options - 
-options = {'offtargetFname':'/output/yo_off.tsv',}
+  Example options - 
+    options = {'offtargetFname':'/output/yo_off.tsv','pam':'NGG','debug':True,'skipAlign':True}
+
 Here are the keys that can be added to options dictionary-
+
 Options:
   debug      -     show debug messages, do not delete temp directory
   test      -      run internal tests
@@ -49,14 +45,20 @@ Options:
   maxOcc - 
                         MAXOCC parameter, guides with more matches are
                         excluded
-  mismatches-      maximum number of mismatches, default 4
-  skipAlign  -         do not align the input sequence. The on-target will be
+
+  mismatches-
+                         maximum number of mismatches, default 4
+  
+  skipAlign  -
+                        do not align the input sequence. The on-target will be
                         a random match with 0 mismatches.
-  noEffScores -        do not calculate the efficiency scores
-  minAltPamScore - 
+  noEffScores -
+                        do not calculate the efficiency scores
+  minAltPamScore -
                         minimum MIT off-target score for alternative PAMs, default
                         1.0
-  genomeDir-            directory with genomes, default ./genomes
+  genomeDir-
+                        directory with genomes, default ./genomes
 ```
     
 
